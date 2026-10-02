@@ -1,2 +1,2 @@
 # -Digital-Forensic-Writeups
-This repository conatian writeups for the digital forensics challenges that i solved
+This repository conatian digital forensics writeups for the challenges that i solved
