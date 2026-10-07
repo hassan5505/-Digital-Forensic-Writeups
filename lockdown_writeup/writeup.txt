@@ -1,0 +1,146 @@
+challenge: lockdown
+challenge_url: https://cyberdefenders.org/blueteam-ctf-challenges/lockdown/
+challenge_difficulty: easy
+challenge_scenario:
+TechNova Systems’ SOC has detected suspicious outbound traffic from a public-facing IIS server in its cloud platform—activity suggestive of a web-shell drop and covert connections to an unknown host.
+As the forensic examiner, you have three critical artefacts in hand: a PCAP capturing the initial traffic, a full memory image of the server, and a malware sample recovered from disk. Reconstruct the intrusion and all of the attacker’s activities so TechNova can contain the breach and strengthen its defenses.
+
+questions:
+
+
+Part 1 — PCAP Analysis
+
+	Q1. After flooding the IIS host with rapid-fire probes, the attacker reveals their origin. Which IP address generated this reconnaissance traffic?
+
+		After opening the PCAP file in Wireshark, there are many TCP packets that "10.0.2.4" sends to the server. The server rejects them from packet 74 to packet 2077. Also, in every packet, the source port from the attacker changes for every packet, so I concluded that it was a port scanning attempt.
+
+
+		10.0.2.4
+
+
+	Q2. The attacker is carrying out targeted enumeration against the HTTP service on the IIS host. Based on the HTTP request headers, which tool is being used?
+
+		Here, after some looking through the HTTP requests, I found this one:
+
+		"2140	94.577381	10.0.2.4	10.0.2.15	HTTP	225	GET /nmaplowercheck1725947084 HTTP/1.1"
+
+		In it, I found:
+
+		"Mozilla/5.0 (compatible; Nmap Scripting Engine; https://nmap.org/book/nse.html)"
+
+
+		answer:
+			-Nmap
+
+
+Q3. While reviewing the SMB traffic, you observe two consecutive Tree Connect requests that expose the first shares the intruder probes on the IIS host. Which two full UNC paths are accessed?
+
+		Applying a filter to only see SMB packets by using "smb2" in the filter bar in Wireshark, I found these two:
+
+		2629	240.778552	10.0.2.4	10.0.2.15	SMB2	162	Tree Connect Request Tree: \\10.0.2.15\IPC$
+
+		2678	263.312045	10.0.2.4	10.0.2.15	SMB2	172	Tree Connect Request Tree: \\10.0.2.15\Documents
+
+		Here, the attacker is requesting to connect to the two shares.
+
+		answer:
+		\\10.0.2.15\Documents, \\10.0.2.15\IPC$
+
+
+
+Q4. Inside the share, the attacker plants a web-accessible payload that will grant remote code execution. What is the filename of the malicious file they uploaded?
+
+		After exporting the objects from SMB by:
+
+		File > Exporting Objects > SMB
+
+		I got 2:
+
+		1- 2723	273.869424	10.0.2.4	10.0.2.15	SMB2	171	Read Request Len:150 Off:0 File: information.txt
+
+		2- 3505	342.611215	10.0.2.4	10.0.2.15	SMB2	494	Write Request Len:1015024 Off:0 File: shell.aspx
+
+		Here, the first one is a read request for the "information.txt" file, and the second one is a write request to write a file to the system. So I exported the file and used "strings shell.aspx", and it was very clear that it was a malicious file even from its name.
+
+		answer:
+		shell.aspx
+
+Q5. The newly planted shell calls back to the attacker over an uncommon but firewall-friendly port. Which listening port did the attacker use for the reverse shell?
+
+		After the attacker successfully wrote the reverse shell file to the system in packet 3573, they reloaded the page in packet 3583. The system reloaded itself and then ran the shell script and connected to the attacker listener. Directly after this, in packet 3585, the server started a connection to the attacker listener.
+
+		so answer:
+		4443
+
+
+Part 2 — Memory Dump Analysis
+
+Q6. Your memory snapshot captures the system’s kernel in situ, providing vital context for the breach. What is the kernel base address in the dump?
+
+		Here, I used the Volatility tool to analyze the memory snapshot.
+
+		I ran the "vol -f memdump.mem windows.info" command, which returned:
+
+		"Kernel Base:     0xf80079213000"
+
+		answer:
+		0xf80079213000
+
+
+Q7. A trusted service launches an unfamiliar executable residing outside the usual IIS stack, signalling a persistence implant. What is the final full on-disk path of that executable?
+
+		Here, I used "vol -f memdump.mem windows.pstree" and identified this weird process:
+
+		900        4332    updatenow.exe C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\updatenow.exe
+
+		ran by:
+
+		4332        2452    w3wp.exe \Device\HarddiskVolume1\Windows\System32\inetsrv\w3wp.exe
+
+		which is the IIS worker process.
+
+		answer:
+		C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\updatenow.exe
+
+
+Q8. The reverse shell’s outbound traffic is handled by a built-in Windows process that also spawns the implanted executable. What is the name of this process, and what PID does it run under?
+
+
+		answer:
+		w3wp.exe, 4332
+
+
+Part 3 — Malware Sample Analysis
+
+Q9. Static inspection reveals the binary has been packed to hinder analysis. Which packer was used to obfuscate it?
+
+		"file updatenow.exe" returned:
+
+		"updatenow.exe: PE32 executable for MS Windows 5.01 (GUI), Intel i386, UPX compressed, 3 sections"
+
+		answer:
+		UPX
+
+
+
+Q10. Threat-intel analysis shows the malware beaconing to its command-and-control host. Which fully qualified domain name (FQDN) does it contact?
+
+		Here, I used "virustotal.com". In the Behavior section, it shows:
+
+		"SMTP communications: cp8nl.hyperhost.ua"
+
+		"DNS Resolutions: cp8nl.hyperhost.ua"
+
+		answer:
+		cp8nl.hyperhost.ua
+
+
+Q11. Open-source intel associates that hash with a well-known commodity RAT. To which malware family does the sample belong?
+
+		I couldn't identify it from the VirusTotal analysis, so I searched for its hash and found results on ANY.RUN that contained its family:
+
+		"Agent Tesla is spyware that collects information about the actions of its victims by recording keystrokes and user interactions. It is falsely marketed as legitimate software on the dedicated website where this malware is sold."
+
+		answer:
+		Agent Tesla
+
